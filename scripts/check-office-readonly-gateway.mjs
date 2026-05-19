@@ -72,6 +72,11 @@ const summarizeTasksBoard = (body) => ({
   generatedAt: body?.generatedAt ?? '(missing)',
 })
 
+const summarizeAuditLog = (body) => ({
+  entries: Array.isArray(body?.entries) ? body.entries.length : 0,
+  generatedAt: body?.generatedAt ?? '(missing)',
+})
+
 const main = async () => {
   if (!token) {
     throw new Error(`Missing read-only gateway token. Set OFFICE_READONLY_GATEWAY_CHECK_TOKEN, or keep ${envFile} available.`)
@@ -85,7 +90,7 @@ const main = async () => {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   })
-  await expectStatus('non-allowlisted path rejected', '/api/audit-log', 404, {
+  await expectStatus('non-allowlisted path rejected', '/api/system-mode', 404, {
     headers: { Authorization: `Bearer ${token}` },
   })
 
@@ -93,11 +98,13 @@ const main = async () => {
   const office = await expectStatus('office instances', '/api/office-instances', 200, { headers })
   const modelUsage = await expectStatus('model usage', '/api/model-usage', 200, { headers })
   const tasksBoard = await expectStatus('tasks board', '/api/tasks-board', 200, { headers })
+  const auditLog = await expectStatus('audit log', '/api/audit-log', 200, { headers })
 
   console.log('[check:readonly-gateway] payload summary:')
   console.log('  office:', JSON.stringify(summarizeOfficeInstances(office)))
   console.log('  modelUsage:', JSON.stringify(summarizeModelUsage(modelUsage)))
   console.log('  tasksBoard:', JSON.stringify(summarizeTasksBoard(tasksBoard)))
+  console.log('  auditLog:', JSON.stringify(summarizeAuditLog(auditLog)))
 }
 
 main().catch((error) => {

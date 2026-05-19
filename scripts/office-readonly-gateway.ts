@@ -21,6 +21,7 @@ const READONLY_PATHS = new Set([
   '/api/office-instances',
   '/api/model-usage',
   '/api/tasks-board',
+  '/api/audit-log',
   '/api/xiguo-task',
 ])
 
