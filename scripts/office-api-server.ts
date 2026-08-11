@@ -11,6 +11,7 @@ import http from 'node:http'
 import { handleInternalWorkbenchRequest } from '../server/internalWorkbench.ts'
 import { fetchModelUsagePayload } from '../server/modelUsage.ts'
 import { fetchOfficeInstancesPayload } from '../server/officeInstances.ts'
+import { fetchGuomaBoardPayload } from '../../kotovela-hub/server/guomaBoard.ts'
 import { normalizeFeishuStudyAudience, sendOpenClawCliStudyMessage } from '../server/xiugDispatch.ts'
 
 const PORT = Number.parseInt(process.env.OFFICE_API_PORT || '8787', 10)
@@ -67,6 +68,7 @@ const fetchCachedModelUsagePayload = async () => {
 const API_HANDLERS = {
   '/api/office-instances': fetchOfficeInstancesPayload,
   '/api/model-usage': fetchCachedModelUsagePayload,
+  '/api/guoma-board': fetchGuomaBoardPayload,
 } as const
 
 const INTERNAL_API_PATHS = new Set([

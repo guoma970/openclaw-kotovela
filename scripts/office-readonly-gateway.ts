@@ -20,6 +20,7 @@ const UPSTREAM_TIMEOUT_MS = Number.parseInt(process.env.OFFICE_READONLY_GATEWAY_
 const READONLY_PATHS = new Set([
   '/api/office-instances',
   '/api/model-usage',
+  '/api/guoma-board',
   '/api/tasks-board',
   '/api/audit-log',
   '/api/xiguo-task',
