@@ -53,10 +53,10 @@
 
 | 变量 | 说明 |
 |------|------|
-| `OFFICE_INSTANCES_UPSTREAM_URL` | 填 **完整 HTTPS** 地址，例如隧道到 Mac mini 的 `https://xxxx.trycloudflare.com/api/office-instances` |
-| `OFFICE_INSTANCES_UPSTREAM_TOKEN` | 与 Mac mini `OFFICE_API_TOKEN` 一致，Vercel 服务端使用，不写入前端静态包 |
-| `MODEL_USAGE_UPSTREAM_URL` | 填 **完整 HTTPS** 地址，例如隧道到 Mac mini 的 `https://xxxx.trycloudflare.com/api/model-usage` |
-| `MODEL_USAGE_UPSTREAM_TOKEN` | 与 Mac mini `OFFICE_API_TOKEN` 一致，Vercel 服务端使用，不写入前端静态包 |
+| `OFFICE_INSTANCES_UPSTREAM_URL` | 填 **完整 HTTPS** 地址，指向 Mac mini 的 `8791` 只读网关，例如 `https://office-api.example.com/api/office-instances` |
+| `OFFICE_INSTANCES_UPSTREAM_TOKEN` | 与 `OFFICE_READONLY_GATEWAY_TOKEN` 一致，Vercel 服务端使用，不写入前端静态包 |
+| `MODEL_USAGE_UPSTREAM_URL` | 填 **完整 HTTPS** 地址，指向同一 `8791` 只读网关，例如 `https://office-api.example.com/api/model-usage` |
+| `MODEL_USAGE_UPSTREAM_TOKEN` | 与 `OFFICE_READONLY_GATEWAY_TOKEN` 一致，Vercel 服务端使用，不写入前端静态包 |
 | `KOTOVELA_ACCESS_SECRET` | 内部站访问口令；用于项目内 middleware 保护页面和 API，不写入前端静态包 |
 | （可选）`VITE_POLLING_INTERVAL_MS` | 默认内部构建为 5s，可按需改 |
 
@@ -130,7 +130,7 @@
 说明 **`VERCEL_BUILD_MODE` 未设为 `internal`**，Vercel 走了 **公开 Demo** 构建路径，而 Demo 守卫禁止 `VITE_DATA_SOURCE=openclaw`。**不要**为通过构建而删掉 `VITE_DATA_SOURCE`（内部站需要 OpenClaw 时应保留）。正确做法：在 **`kotovelahub` 的 Production（及需要的 Preview）** 增加 **`VERCEL_BUILD_MODE=internal`**，保存后 **Redeploy**。
 
 **Q：想连家里 Mac mini API？**  
-Mac mini 上跑 `npm run serve:office-api`，用 Cloudflare Tunnel 等得到 HTTPS，把完整 API URL 分别写入 `OFFICE_INSTANCES_UPSTREAM_URL` / `MODEL_USAGE_UPSTREAM_URL`，并把同一个 `OFFICE_API_TOKEN` 写入对应 `*_TOKEN` 后 **重新部署**。
+Mac mini 上运行 `./scripts/install-office-bridge-runtime-launchd.sh`，让 Cloudflare Tunnel 只连接 `127.0.0.1:8791` 的白名单网关。把完整 HTTPS URL 分别写入 `OFFICE_INSTANCES_UPSTREAM_URL` / `MODEL_USAGE_UPSTREAM_URL`，并把 `OFFICE_READONLY_GATEWAY_TOKEN` 写入对应 `*_TOKEN` 后 **重新部署**。
 
 **Q：快照太旧？**  
 在本机或 CI 执行 `npm run sync:office-snapshot`，提交 `data/office-instances.snapshot.json` 后再推送到触发 Vercel 构建。

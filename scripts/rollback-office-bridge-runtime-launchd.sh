@@ -73,11 +73,20 @@ restart_all() {
 
 verify_all() {
   local label
-  sleep 2
+  local attempt
   for label in "${LABELS[@]}"; do
-    "$LAUNCHCTL_BIN" print "${USER_DOMAIN}/${label}" | rg -q 'state = running' || return $?
+    for attempt in {1..45}; do
+      if "$LAUNCHCTL_BIN" print "${USER_DOMAIN}/${label}" 2>/dev/null | rg -q 'state = running'; then
+        break
+      fi
+      sleep 1
+    done
+    if [[ "$attempt" == "45" ]] && ! "$LAUNCHCTL_BIN" print "${USER_DOMAIN}/${label}" 2>/dev/null | rg -q 'state = running'; then
+      echo "Error: launchd service did not reach running state within 45 seconds: ${label}" >&2
+      return 1
+    fi
   done
-  curl -fsS http://127.0.0.1:8791/healthz >/dev/null || return $?
+  curl --retry 5 --retry-all-errors --connect-timeout 3 --max-time 15 -fsS http://127.0.0.1:8791/healthz >/dev/null || return $?
 }
 
 switch_current "$TARGET_DIR"

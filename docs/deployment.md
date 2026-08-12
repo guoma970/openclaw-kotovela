@@ -52,7 +52,7 @@ npm run dev:internal
 
 5. **外出访问（手机 / Vercel 读家里 Mac）**
    云端 **没有** 你的 `openclaw` 二进制和本机 Claude Code 状态，需二选一：
-   - 在 **Mac mini** 上 `npm run serve:office-api` 暴露 `8787`，再用隧道把 **HTTPS** 指到该端口；Vercel 内部项目里配置 **服务端上游变量**（`OFFICE_INSTANCES_UPSTREAM_URL` / `MODEL_USAGE_UPSTREAM_URL` 及对应 token）。见下文「Mac mini 常驻」与 **`docs/vercel-setup.md`**。
+   - 在 **Mac mini** 上安装 detached office-bridge runtime；公网隧道只指向 `127.0.0.1:8791` 的白名单网关，完整 office API 仅监听 `127.0.0.1:8787`。Vercel 内部项目里配置 **服务端上游变量**（`OFFICE_INSTANCES_UPSTREAM_URL` / `MODEL_USAGE_UPSTREAM_URL` 及对应 token）。见下文「Mac mini 常驻」与 **`docs/vercel-setup.md`**。
    - 如果你外出时希望继续只靠飞书研发群推进开发，请在私有运行环境中配置项目研发群；公开仓库只保留占位符（如 `<FEISHU_CHAT_ID_KOTOVELA_HUB>`）。具体接力口径见 **`docs/ops/feishu-dev-handoff.md`**。
 
 ## 生产构建校验
@@ -80,16 +80,18 @@ npm run build
 - 不依赖本地 `localhost`
 - 仍保留实例状态与模型用量接口的预发布版本
 
-## Mac mini 常驻：自建 office API（外出访问）
+## Mac mini 常驻：detached office bridge（外出访问）
 
-若有一台 **24h 开机的 Mac mini**，已安装并运行 OpenClaw，可在该机器仓库目录执行：
+若有一台 **24h 开机的 Mac mini**，已安装并运行 OpenClaw，先在仓库里准备依赖，再安装到 Git 工作树外的版本化运行目录：
 
 ```bash
 npm install
 OFFICE_API_PORT=8787 \
 OFFICE_API_TOKEN='随机长密钥' \
 OFFICE_API_CORS_ORIGIN='https://kotovelahub.vercel.app' \
-npm run serve:office-api
+OFFICE_READONLY_GATEWAY_TOKEN='另一条随机长密钥' \
+OFFICE_READONLY_GATEWAY_UPSTREAM_TOKEN='随机长密钥' \
+./scripts/install-office-bridge-runtime-launchd.sh
 ```
 
 在另一个终端执行自检；`OFFICE_CHECK_TOKEN` 必须与服务启动时的 `OFFICE_API_TOKEN` 完全一致：
@@ -105,7 +107,7 @@ OFFICE_CHECK_TOKEN='随机长密钥' npm run check:office-api
 - 鉴权（推荐）：设置 `OFFICE_API_TOKEN` 后，请求需带 `Authorization: Bearer <token>` 或 `?token=<token>`；线上 Vercel 应使用服务端变量保存 token，避免写入前端静态包
 - 内部访问口令：Vercel 项目需设置 `KOTOVELA_ACCESS_SECRET`，仓库根 `middleware.ts` 会同时保护页面与 `/api/*`，未登录 API 应返回 `401`
 - **外出访问**：家庭宽带通常无固定公网 IP，需任选其一：
-  - **Cloudflare Tunnel** / **Tailscale Funnel** / **ngrok**：把 `8787` 暴露为 **HTTPS**（避免浏览器混合内容拦截）
+  - **Cloudflare Tunnel** / **Tailscale Funnel** / **ngrok**：把只读网关 `8791` 暴露为 **HTTPS**（不得直接暴露完整 API 的 `8787`）
   - 或 **仅 Tailscale/ZeroTier VPN**：手机加入同一虚拟网后访问 `http://100.x.x.x:8787`
 - **Vercel internal 前端**：前端继续走同域 `/api/office-instances` / `/api/model-usage`；在 Vercel 服务端环境变量里把上游地址设为隧道给出的 **HTTPS** 地址（分别带 `/api/office-instances` 与 `/api/model-usage` 路径）
 - **launchd**：仓库提供本机用户级 LaunchAgent 脚本，把 office-api、只读网关和 Cloudflare connector 打包到 Git 工作树外的版本化运行目录，并在异常退出后由 `KeepAlive` 拉起。

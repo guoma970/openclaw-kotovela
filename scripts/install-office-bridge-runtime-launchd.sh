@@ -140,29 +140,41 @@ start_agent() {
   "$LAUNCHCTL_BIN" kickstart -k "${USER_DOMAIN}/${label}"
 }
 
+wait_agent_running() {
+  local label="$1"
+  local attempt
+  for attempt in {1..45}; do
+    if "$LAUNCHCTL_BIN" print "${USER_DOMAIN}/${label}" 2>/dev/null | rg -q 'state = running'; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "Error: launchd service did not reach running state within 45 seconds: ${label}" >&2
+  return 1
+}
+
 verify_runtime() {
   local api_url="http://${OFFICE_API_HOST:-127.0.0.1}:${OFFICE_API_PORT:-8787}/api/office-instances"
   local gateway_url="http://${OFFICE_READONLY_GATEWAY_HOST:-127.0.0.1}:${OFFICE_READONLY_GATEWAY_PORT:-8791}"
   local response_file
   local status
 
-  sleep 2
   for label in "${LABELS[@]}"; do
-    "$LAUNCHCTL_BIN" print "${USER_DOMAIN}/${label}" | rg -q 'state = running'
+    wait_agent_running "$label"
   done
 
   response_file="$(mktemp /tmp/kotovela-office-api-verify.XXXXXX)"
-  status="$(curl -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer ${OFFICE_API_TOKEN}" "$api_url")"
+  status="$(curl --retry 5 --retry-all-errors --connect-timeout 3 --max-time 15 -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer ${OFFICE_API_TOKEN}" "$api_url")"
   unlink "$response_file"
   [[ "$status" == "200" ]]
 
   response_file="$(mktemp /tmp/kotovela-office-gateway-verify.XXXXXX)"
-  status="$(curl -sS -o "$response_file" -w '%{http_code}' "${gateway_url}/healthz")"
+  status="$(curl --retry 5 --retry-all-errors --connect-timeout 3 --max-time 15 -sS -o "$response_file" -w '%{http_code}' "${gateway_url}/healthz")"
   unlink "$response_file"
   [[ "$status" == "200" ]]
 
   response_file="$(mktemp /tmp/kotovela-office-gateway-auth-verify.XXXXXX)"
-  status="$(curl -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer ${OFFICE_READONLY_GATEWAY_TOKEN}" "${gateway_url}/api/office-instances")"
+  status="$(curl --retry 5 --retry-all-errors --connect-timeout 3 --max-time 15 -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer ${OFFICE_READONLY_GATEWAY_TOKEN}" "${gateway_url}/api/office-instances")"
   unlink "$response_file"
   [[ "$status" == "200" ]]
 }
@@ -271,7 +283,7 @@ write_export "$TMP_OFFICE_API_ENV" AUDIT_LOG_FILE "${STATE_ROOT}/server/data/aud
 write_export "$TMP_OFFICE_API_ENV" CONTENT_LEARNING_FILE "${STATE_ROOT}/data/content-learning.json"
 write_export "$TMP_OFFICE_API_ENV" MODE_STATE_FILE "${STATE_ROOT}/server/data/system-mode.internal.json"
 write_export "$TMP_OFFICE_API_ENV" OFFICE_INSTANCES_SNAPSHOT_PATH "${STATE_ROOT}/data/office-instances.snapshot.json"
-write_export "$TMP_OFFICE_API_ENV" GUOMA_BOARD_WORKSPACE_ROOT "/Users/ztl"
+write_export "$TMP_OFFICE_API_ENV" GUOMA_BOARD_WORKSPACE_ROOT "${KOTOVELA_WORKSPACE_ROOT:-$HOME}"
 write_export "$TMP_OFFICE_API_ENV" NODE_BIN "$NODE_BIN"
 chmod 600 "$TMP_OFFICE_API_ENV"
 mv "$TMP_OFFICE_API_ENV" "$OFFICE_API_ENV_FILE"
