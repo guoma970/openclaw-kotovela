@@ -56,7 +56,7 @@ switch_current() {
   local target="$1"
   local next_link="${RUNTIME_ROOT}/.current.rollback.$$"
   ln -s "$target" "$next_link"
-  mv -f "$next_link" "$CURRENT_LINK"
+  mv -f -h "$next_link" "$CURRENT_LINK"
 }
 
 restart_all() {

@@ -10,6 +10,7 @@ RELEASES_DIR="${RUNTIME_ROOT}/releases"
 STATE_ROOT="${RUNTIME_ROOT}/state"
 BACKUPS_DIR="${RUNTIME_ROOT}/backups"
 CURRENT_LINK="${RUNTIME_ROOT}/current"
+SNAPSHOT_CURRENT_LINK="${RUNTIME_ROOT}/snapshot-current"
 LOG_DIR="${KOTOVELA_OFFICE_BRIDGE_LOG_DIR:-${HOME}/Library/Logs/Kotovela/office-bridge}"
 CONFIG_DIR="${HOME}/.config/kotovela"
 AGENT_DIR="${HOME}/Library/LaunchAgents"
@@ -35,7 +36,9 @@ RELEASE_DIR="${RELEASES_DIR}/${RELEASE_ID}"
 STAGING_DIR="${RELEASES_DIR}/.${RELEASE_ID}.staging.$$"
 BACKUP_DIR="${BACKUPS_DIR}/$(date -u '+%Y%m%dT%H%M%SZ')"
 PREVIOUS_TARGET=""
+PREVIOUS_SNAPSHOT_TARGET=""
 SWITCHED_CURRENT=0
+SWITCHED_SNAPSHOT_CURRENT=0
 INSTALLING=0
 
 LABELS=(
@@ -43,6 +46,7 @@ LABELS=(
   com.kotovela.office-readonly-gateway
   com.kotovela.cloudflare-readonly-tunnel
 )
+SNAPSHOT_LABEL="com.kotovela.office-snapshot-sync"
 
 OFFICE_API_KEYS=(
   OFFICE_API_PORT
@@ -130,6 +134,38 @@ EOF_PLIST
   chmod 600 "$target_path"
 }
 
+write_snapshot_plist() {
+  local target_path="$1"
+
+  cat > "$target_path" <<EOF_PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${SNAPSHOT_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>$(xml_escape "${SNAPSHOT_CURRENT_LINK}/run-office-snapshot-sync.sh")</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>$(xml_escape "$SNAPSHOT_CURRENT_LINK")</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>600</integer>
+  <key>StandardOutPath</key>
+  <string>$(xml_escape "${LOG_DIR}/office-snapshot-sync.log")</string>
+  <key>StandardErrorPath</key>
+  <string>$(xml_escape "${LOG_DIR}/office-snapshot-sync.error.log")</string>
+</dict>
+</plist>
+EOF_PLIST
+  plutil -lint "$target_path" >/dev/null
+  chmod 600 "$target_path"
+}
+
 start_agent() {
   local label="$1"
   local plist_path="${AGENT_DIR}/${label}.plist"
@@ -138,6 +174,54 @@ start_agent() {
   "$LAUNCHCTL_BIN" bootstrap "$USER_DOMAIN" "$plist_path"
   "$LAUNCHCTL_BIN" enable "${USER_DOMAIN}/${label}" >/dev/null 2>&1 || true
   "$LAUNCHCTL_BIN" kickstart -k "${USER_DOMAIN}/${label}"
+}
+
+start_snapshot_agent() {
+  local plist_path="${AGENT_DIR}/${SNAPSHOT_LABEL}.plist"
+  "$LAUNCHCTL_BIN" bootout "$USER_DOMAIN" "$plist_path" 2>/dev/null || true
+  "$LAUNCHCTL_BIN" bootout "${USER_DOMAIN}/${SNAPSHOT_LABEL}" 2>/dev/null || true
+  "$LAUNCHCTL_BIN" bootstrap "$USER_DOMAIN" "$plist_path"
+  "$LAUNCHCTL_BIN" enable "${USER_DOMAIN}/${SNAPSHOT_LABEL}" >/dev/null 2>&1 || true
+  "$LAUNCHCTL_BIN" kickstart -k "${USER_DOMAIN}/${SNAPSHOT_LABEL}"
+}
+
+verify_snapshot_agent() {
+  local runtime_snapshot="${STATE_ROOT}/data/office-instances.snapshot.json"
+  local sync_snapshot="${HOME}/06-builder/kotovela/kotovela-workbench-sync/data/office-instances.snapshot.json"
+  local attempt
+  local service_state
+  local last_exit
+
+  for attempt in {1..60}; do
+    service_state="$("$LAUNCHCTL_BIN" print "${USER_DOMAIN}/${SNAPSHOT_LABEL}" 2>/dev/null | awk -F'= ' '/^[[:space:]]*state = /{gsub(/[[:space:]]/,"",$2); print $2; exit}')"
+    last_exit="$("$LAUNCHCTL_BIN" print "${USER_DOMAIN}/${SNAPSHOT_LABEL}" 2>/dev/null | awk -F'= ' '/^[[:space:]]*last exit code = /{gsub(/[[:space:]]/,"",$2); print $2; exit}')"
+    if [[ "$service_state" == "notrunning" && "$last_exit" == "0" ]]; then
+      break
+    fi
+    if [[ "$service_state" == "notrunning" && -n "$last_exit" && "$last_exit" != "0" ]]; then
+      echo "Error: snapshot sync exited with code ${last_exit}." >&2
+      return 1
+    fi
+    sleep 1
+  done
+
+  if [[ "$attempt" == "60" && ( "$service_state" != "notrunning" || "$last_exit" != "0" ) ]]; then
+    echo "Error: snapshot sync did not finish successfully within 60 seconds." >&2
+    return 1
+  fi
+
+  [[ -f "$runtime_snapshot" && -f "$sync_snapshot" ]]
+  cmp -s "$runtime_snapshot" "$sync_snapshot"
+  /usr/bin/python3 - "$runtime_snapshot" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], 'r', encoding='utf-8') as handle:
+    payload = json.load(handle)
+
+if len(payload.get('instances', [])) < 6:
+    raise SystemExit(1)
+PY
 }
 
 wait_agent_running() {
@@ -157,26 +241,26 @@ verify_runtime() {
   local api_url="http://${OFFICE_API_HOST:-127.0.0.1}:${OFFICE_API_PORT:-8787}/api/office-instances"
   local gateway_url="http://${OFFICE_READONLY_GATEWAY_HOST:-127.0.0.1}:${OFFICE_READONLY_GATEWAY_PORT:-8791}"
   local response_file
-  local status
+  local http_status
 
   for label in "${LABELS[@]}"; do
     wait_agent_running "$label"
   done
 
   response_file="$(mktemp /tmp/kotovela-office-api-verify.XXXXXX)"
-  status="$(curl --retry 5 --retry-all-errors --connect-timeout 3 --max-time 15 -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer ${OFFICE_API_TOKEN}" "$api_url")"
+  http_status="$(curl --retry 5 --retry-all-errors --connect-timeout 3 --max-time 15 -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer ${OFFICE_API_TOKEN}" "$api_url")"
   unlink "$response_file"
-  [[ "$status" == "200" ]]
+  [[ "$http_status" == "200" ]]
 
   response_file="$(mktemp /tmp/kotovela-office-gateway-verify.XXXXXX)"
-  status="$(curl --retry 5 --retry-all-errors --connect-timeout 3 --max-time 15 -sS -o "$response_file" -w '%{http_code}' "${gateway_url}/healthz")"
+  http_status="$(curl --retry 5 --retry-all-errors --connect-timeout 3 --max-time 15 -sS -o "$response_file" -w '%{http_code}' "${gateway_url}/healthz")"
   unlink "$response_file"
-  [[ "$status" == "200" ]]
+  [[ "$http_status" == "200" ]]
 
   response_file="$(mktemp /tmp/kotovela-office-gateway-auth-verify.XXXXXX)"
-  status="$(curl --retry 5 --retry-all-errors --connect-timeout 3 --max-time 15 -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer ${OFFICE_READONLY_GATEWAY_TOKEN}" "${gateway_url}/api/office-instances")"
+  http_status="$(curl --retry 5 --retry-all-errors --connect-timeout 3 --max-time 15 -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer ${OFFICE_READONLY_GATEWAY_TOKEN}" "${gateway_url}/api/office-instances")"
   unlink "$response_file"
-  [[ "$status" == "200" ]]
+  [[ "$http_status" == "200" ]]
 }
 
 restore_previous_runtime() {
@@ -184,14 +268,25 @@ restore_previous_runtime() {
   for label in "${LABELS[@]}"; do
     "$LAUNCHCTL_BIN" bootout "${USER_DOMAIN}/${label}" 2>/dev/null
   done
+  "$LAUNCHCTL_BIN" bootout "${USER_DOMAIN}/${SNAPSHOT_LABEL}" 2>/dev/null
 
   if [[ "$SWITCHED_CURRENT" == "1" ]]; then
     if [[ -n "$PREVIOUS_TARGET" ]]; then
       local rollback_link="${RUNTIME_ROOT}/.current.rollback.$$"
       ln -s "$PREVIOUS_TARGET" "$rollback_link"
-      mv -f "$rollback_link" "$CURRENT_LINK"
+      mv -f -h "$rollback_link" "$CURRENT_LINK"
     elif [[ -L "$CURRENT_LINK" ]]; then
       unlink "$CURRENT_LINK"
+    fi
+  fi
+
+  if [[ "$SWITCHED_SNAPSHOT_CURRENT" == "1" ]]; then
+    if [[ -n "$PREVIOUS_SNAPSHOT_TARGET" ]]; then
+      local snapshot_rollback_link="${RUNTIME_ROOT}/.snapshot-current.rollback.$$"
+      ln -s "$PREVIOUS_SNAPSHOT_TARGET" "$snapshot_rollback_link"
+      mv -f -h "$snapshot_rollback_link" "$SNAPSHOT_CURRENT_LINK"
+    elif [[ -L "$SNAPSHOT_CURRENT_LINK" ]]; then
+      unlink "$SNAPSHOT_CURRENT_LINK"
     fi
   fi
 
@@ -206,15 +301,23 @@ restore_previous_runtime() {
         unlink "$live_plist"
       fi
     done
+    local saved_snapshot_plist="${BACKUP_DIR}/${SNAPSHOT_LABEL}.plist"
+    local live_snapshot_plist="${AGENT_DIR}/${SNAPSHOT_LABEL}.plist"
+    if [[ -f "$saved_snapshot_plist" ]]; then
+      cp "$saved_snapshot_plist" "$live_snapshot_plist"
+      "$LAUNCHCTL_BIN" bootstrap "$USER_DOMAIN" "$live_snapshot_plist" 2>/dev/null
+    elif [[ -f "${BACKUP_DIR}/${SNAPSHOT_LABEL}.missing" && -f "$live_snapshot_plist" ]]; then
+      unlink "$live_snapshot_plist"
+    fi
   fi
   set -e
 }
 
 fail_with_rollback() {
-  local status=$?
+  local failure_code=$?
   echo "Error: runtime installation failed; restoring the previous launchd/runtime state." >&2
   restore_previous_runtime
-  exit "$status"
+  exit "$failure_code"
 }
 
 if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
@@ -232,7 +335,7 @@ if [[ -z "$CLOUDFLARED_BIN" || ! -x "$CLOUDFLARED_BIN" ]]; then
   exit 69
 fi
 
-for runner in run-office-api.sh run-office-readonly-gateway.sh run-cloudflare-readonly-tunnel.sh; do
+for runner in run-office-api.sh run-office-readonly-gateway.sh run-cloudflare-readonly-tunnel.sh run-office-snapshot-sync.sh; do
   if [[ ! -f "${DEPLOYMENT_ROOT}/${runner}" ]]; then
     echo "Error: runtime runner is missing: ${DEPLOYMENT_ROOT}/${runner}" >&2
     exit 66
@@ -380,14 +483,17 @@ mkdir -p "$STAGING_DIR"
   --bundle --platform=node --format=esm --target=node22 --legal-comments=none \
   --outfile="${STAGING_DIR}/office-readonly-gateway.mjs"
 
+cp "${SOURCE_ROOT}/scripts/export-office-snapshot.mjs" "${STAGING_DIR}/export-office-snapshot.mjs"
 cp "${DEPLOYMENT_ROOT}/run-office-api.sh" "${STAGING_DIR}/run-office-api.sh"
 cp "${DEPLOYMENT_ROOT}/run-office-readonly-gateway.sh" "${STAGING_DIR}/run-office-readonly-gateway.sh"
 cp "${DEPLOYMENT_ROOT}/run-cloudflare-readonly-tunnel.sh" "${STAGING_DIR}/run-cloudflare-readonly-tunnel.sh"
+cp "${DEPLOYMENT_ROOT}/run-office-snapshot-sync.sh" "${STAGING_DIR}/run-office-snapshot-sync.sh"
 chmod 755 "${STAGING_DIR}"/*.sh
 chmod 644 "${STAGING_DIR}"/*.mjs
 
 "$NODE_BIN" --check "${STAGING_DIR}/office-api-server.mjs"
 "$NODE_BIN" --check "${STAGING_DIR}/office-readonly-gateway.mjs"
+"$NODE_BIN" --check "${STAGING_DIR}/export-office-snapshot.mjs"
 if rg -F "$SOURCE_ROOT" "$STAGING_DIR" >/dev/null 2>&1; then
   echo "Error: the runtime bundle still contains the development worktree path." >&2
   exit 65
@@ -399,6 +505,7 @@ source_commit=${SOURCE_COMMIT}
 created_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 office_api_sha256=$(shasum -a 256 "${STAGING_DIR}/office-api-server.mjs" | awk '{print $1}')
 readonly_gateway_sha256=$(shasum -a 256 "${STAGING_DIR}/office-readonly-gateway.mjs" | awk '{print $1}')
+snapshot_exporter_sha256=$(shasum -a 256 "${STAGING_DIR}/export-office-snapshot.mjs" | awk '{print $1}')
 EOF_MANIFEST
 chmod 644 "${STAGING_DIR}/manifest.txt"
 mv "$STAGING_DIR" "$RELEASE_DIR"
@@ -412,6 +519,13 @@ for label in "${LABELS[@]}"; do
     touch "${BACKUP_DIR}/${label}.missing"
   fi
 done
+snapshot_plist="${AGENT_DIR}/${SNAPSHOT_LABEL}.plist"
+if [[ -f "$snapshot_plist" ]]; then
+  cp "$snapshot_plist" "${BACKUP_DIR}/${SNAPSHOT_LABEL}.plist"
+  chmod 600 "${BACKUP_DIR}/${SNAPSHOT_LABEL}.plist"
+else
+  touch "${BACKUP_DIR}/${SNAPSHOT_LABEL}.missing"
+fi
 
 if [[ -L "$CURRENT_LINK" ]]; then
   PREVIOUS_TARGET="$(readlink "$CURRENT_LINK")"
@@ -419,23 +533,46 @@ elif [[ -e "$CURRENT_LINK" ]]; then
   echo "Error: current runtime path exists but is not a symlink: ${CURRENT_LINK}" >&2
   exit 73
 fi
+if [[ -L "$SNAPSHOT_CURRENT_LINK" ]]; then
+  PREVIOUS_SNAPSHOT_TARGET="$(readlink "$SNAPSHOT_CURRENT_LINK")"
+elif [[ -e "$SNAPSHOT_CURRENT_LINK" ]]; then
+  echo "Error: snapshot runtime path exists but is not a symlink: ${SNAPSHOT_CURRENT_LINK}" >&2
+  exit 73
+fi
 [[ -n "$PREVIOUS_TARGET" ]] && print -r -- "$PREVIOUS_TARGET" > "${BACKUP_DIR}/previous-current-target.txt"
+[[ -n "$PREVIOUS_SNAPSHOT_TARGET" ]] && print -r -- "$PREVIOUS_SNAPSHOT_TARGET" > "${BACKUP_DIR}/previous-snapshot-current-target.txt"
 
 INSTALLING=1
 trap fail_with_rollback ERR
 
 NEXT_LINK="${RUNTIME_ROOT}/.current.next.$$"
 ln -s "$RELEASE_DIR" "$NEXT_LINK"
-mv -f "$NEXT_LINK" "$CURRENT_LINK"
+mv -f -h "$NEXT_LINK" "$CURRENT_LINK"
 SWITCHED_CURRENT=1
+
+NEXT_SNAPSHOT_LINK="${RUNTIME_ROOT}/.snapshot-current.next.$$"
+ln -s "$RELEASE_DIR" "$NEXT_SNAPSHOT_LINK"
+if [[ -L "$SNAPSHOT_CURRENT_LINK" ]]; then
+  mv -f -h "$NEXT_SNAPSHOT_LINK" "$SNAPSHOT_CURRENT_LINK"
+elif [[ -e "$SNAPSHOT_CURRENT_LINK" ]]; then
+  echo "Error: snapshot runtime path exists but is not a symlink: ${SNAPSHOT_CURRENT_LINK}" >&2
+  false
+else
+  mv "$NEXT_SNAPSHOT_LINK" "$SNAPSHOT_CURRENT_LINK"
+fi
+SWITCHED_SNAPSHOT_CURRENT=1
 
 write_service_plist com.kotovela.office-api run-office-api.sh office-api "${AGENT_DIR}/com.kotovela.office-api.plist"
 write_service_plist com.kotovela.office-readonly-gateway run-office-readonly-gateway.sh office-readonly-gateway "${AGENT_DIR}/com.kotovela.office-readonly-gateway.plist"
 write_service_plist com.kotovela.cloudflare-readonly-tunnel run-cloudflare-readonly-tunnel.sh cloudflare-readonly-tunnel "${AGENT_DIR}/com.kotovela.cloudflare-readonly-tunnel.plist"
+write_snapshot_plist "${AGENT_DIR}/${SNAPSHOT_LABEL}.plist"
 
 start_agent com.kotovela.office-api
 start_agent com.kotovela.office-readonly-gateway
 start_agent com.kotovela.cloudflare-readonly-tunnel
+verify_runtime
+start_snapshot_agent
+verify_snapshot_agent
 verify_runtime
 trap - ERR
 INSTALLING=0

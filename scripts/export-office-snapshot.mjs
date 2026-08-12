@@ -16,7 +16,9 @@ const OFFICE_ROLE_MAP = {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const snapshotPath = path.resolve(__dirname, '../data/office-instances.snapshot.json')
+const snapshotPath = path.resolve(
+  process.env.OFFICE_SNAPSHOT_OUTPUT_PATH || path.resolve(__dirname, '../data/office-instances.snapshot.json'),
+)
 
 const toMs = (value) => {
   if (typeof value === 'number' && Number.isFinite(value)) {

@@ -37,17 +37,25 @@ All three bridge processes are user-level launchd agents:
 - `com.kotovela.office-readonly-gateway`
 - `com.kotovela.cloudflare-readonly-tunnel`
 
-The three-process bridge runs from a versioned release below
+The bridge runs from a versioned release below
 `~/Library/Application Support/Kotovela/office-bridge-runtime`, not from the Git
 worktree. Mutable state is kept in the sibling `state` directory, credentials
 remain under `~/.config/kotovela` with mode `600`, and logs are written below
 `~/Library/Logs/Kotovela/office-bridge`.
+
+The 10-minute snapshot job is deployed from its own `snapshot-current` release
+pointer as `com.kotovela.office-snapshot-sync`. It writes only to the runtime
+`state` directory and the dedicated `kotovela-workbench-sync` replica; it no
+longer writes the development worktree and can be updated independently from
+the API/gateway/tunnel chain.
 
 List releases and roll back by explicit release id:
 
 ```bash
 ./scripts/rollback-office-bridge-runtime-launchd.sh --list
 ./scripts/rollback-office-bridge-runtime-launchd.sh <release-id>
+./scripts/rollback-office-snapshot-runtime-launchd.sh --list
+./scripts/rollback-office-snapshot-runtime-launchd.sh <release-id>
 ```
 
 Runtime secrets are stored outside the repository under `~/.config/kotovela/` and must not be committed.
