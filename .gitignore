@@ -34,6 +34,7 @@ server/data/*.runtime.json
 public/system-test-results.json
 data/scheduler-memory.json
 data/scheduler-template-pool.json
+data/office-instances.snapshot.json
 
 # Evidence screenshots (captured by verify toolchain, not for repo tracking)
 screenshots/
