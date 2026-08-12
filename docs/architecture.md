@@ -89,7 +89,9 @@ flowchart TD
 | `KOTOVELA_PUBLIC_ORIGIN` | 生成回到驾驶舱的公网链接 | server/xiguoTaskAccess | 可选 | `https://hub.kotovela.com` |
 | `KOTOVELA_CLOUDFLARE_HOSTNAME` | Cloudflare Tunnel 固定域名 | tunnel scripts | 可选 | `office-api.kotovela.com` |
 | `KOTOVELA_CLOUDFLARE_SERVICE_URL` | Tunnel 指向的本机服务 | tunnel scripts | 可选 | `http://127.0.0.1:8791` |
-| `KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN` | Cloudflare Tunnel token | tunnel scripts | 可选 | `<cloudflare-token>` |
+| `KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN` | Cloudflare Tunnel token，仅供 installer 一次性迁移，runner 拒绝内联 token | tunnel installer | 可选 | `<cloudflare-token>` |
+| `KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN_FILE` | 权限为 `600` 的 Cloudflare Tunnel token 文件 | tunnel scripts | token 模式必填 | `~/.config/kotovela/cloudflare-readonly-tunnel.token` |
+| `KOTOVELA_CLOUDFLARE_REPLACE_TUNNEL_TOKEN_FILE` | installer 是否用一次性内联 token 覆盖现有 token 文件 | tunnel installer | 轮换时可选 | `1` |
 | `KOTOVELA_CLOUDFLARE_TUNNEL_NAME` | Tunnel 名称 | tunnel scripts | 可选 | `kotovela-office-readonly` |
 | `KOTOVELA_CLOUDFLARE_TUNNEL_ENV_FILE` | Tunnel launchd 环境文件路径 | tunnel scripts | 可选 | `~/.config/kotovela/cloudflare-readonly-tunnel.env` |
 | `KOTOVELA_CLOUDFLARE_TUNNEL_PROTOCOL` | cloudflared 协议 | tunnel scripts | 可选 | `http2` |

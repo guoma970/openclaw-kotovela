@@ -108,15 +108,29 @@ If `cloudflared tunnel login` cannot write `~/.cloudflared/cert.pem`, use the Cl
 4. Add one public hostname, for example `office-api.<your-cloudflare-domain>`.
 5. Set the public hostname service to `http://127.0.0.1:8791`.
 6. Copy the connector token from Cloudflare.
-7. Install the local launchd connector with token mode:
+7. Read it without putting the secret in shell history, then install the local launchd connector:
 
 ```bash
+read -s 'KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN?Cloudflare Tunnel token: '
+export KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN
 KOTOVELA_CLOUDFLARE_HOSTNAME=office-api.<your-cloudflare-domain> \
-KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN=<cloudflare-tunnel-token> \
   ./scripts/install-cloudflare-readonly-tunnel-launchd.sh
+unset KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN
 ```
 
-Token mode does not require `cert.pem`. The public hostname and local service target are managed in the Cloudflare dashboard.
+The installer immediately moves the token to `~/.config/kotovela/cloudflare-readonly-tunnel.token` with mode `600`; the launchd process uses `--token-file`, so the token is not visible in process arguments. Token mode does not require `cert.pem`. The public hostname and local service target are managed in the Cloudflare dashboard.
+
+To rotate an existing or exposed token, select **Refresh token** in the Tunnel overview, copy the newly generated connector token, and replace the protected local file through the installer:
+
+```bash
+read -s 'KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN?New Cloudflare Tunnel token: '
+export KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN
+KOTOVELA_CLOUDFLARE_REPLACE_TUNNEL_TOKEN_FILE=1 \
+  ./scripts/install-cloudflare-readonly-tunnel-launchd.sh
+unset KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN
+```
+
+Confirm the dashboard reports `Healthy`, `npm run check:office-readonly-gateway` passes, and the `cloudflared` process contains `--token-file` but no `--token` argument. For an exposed token, also verify that no unexpected connectors remain in the Tunnel overview.
 
 If a DNS record already exists and you intentionally want to replace it:
 
