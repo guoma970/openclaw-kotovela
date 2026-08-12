@@ -10,8 +10,10 @@ These files look suitable to include after review:
 - `package.json`, `package-lock.json`, TypeScript/Vite/ESLint config files
 - `src/**`, `api/**`, `server/**` source files
 - `scripts/check-office-api.mjs`
-- `scripts/install-office-api-launchd.sh`
-- `scripts/run-office-api.sh`
+- `scripts/install-office-bridge-runtime-launchd.sh`
+- `scripts/rollback-office-bridge-runtime-launchd.sh`
+- `scripts/install-office-api-launchd.sh` (compatibility wrapper)
+- `deployment/office-bridge/**`
 - `scripts/uninstall-office-api-launchd.sh`
 - `docs/deployment.md`
 - `docs/ops/feishu-dev-handoff.md` if group IDs and handoff wording are intentionally public; otherwise redact before publishing

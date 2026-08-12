@@ -23,19 +23,32 @@ Guard behavior:
 The full office API should stay local-only:
 
 ```bash
-OFFICE_API_HOST=127.0.0.1 OFFICE_API_PORT=8787 ./scripts/install-office-api-launchd.sh
+OFFICE_API_HOST=127.0.0.1 OFFICE_API_PORT=8787 ./scripts/install-office-bridge-runtime-launchd.sh
 ```
 
 The public tunnel should point to the read-only gateway:
 
-```bash
-OFFICE_READONLY_GATEWAY_PORT=8791 ./scripts/install-office-readonly-gateway-launchd.sh
-```
+The same installer deploys the gateway and the Cloudflare connector. The legacy
+component installer names are compatibility wrappers for this command.
 
-Both services are user-level launchd agents:
+All three bridge processes are user-level launchd agents:
 
 - `com.kotovela.office-api`
 - `com.kotovela.office-readonly-gateway`
+- `com.kotovela.cloudflare-readonly-tunnel`
+
+The three-process bridge runs from a versioned release below
+`~/Library/Application Support/Kotovela/office-bridge-runtime`, not from the Git
+worktree. Mutable state is kept in the sibling `state` directory, credentials
+remain under `~/.config/kotovela` with mode `600`, and logs are written below
+`~/Library/Logs/Kotovela/office-bridge`.
+
+List releases and roll back by explicit release id:
+
+```bash
+./scripts/rollback-office-bridge-runtime-launchd.sh --list
+./scripts/rollback-office-bridge-runtime-launchd.sh <release-id>
+```
 
 Runtime secrets are stored outside the repository under `~/.config/kotovela/` and must not be committed.
 
@@ -114,7 +127,7 @@ If `cloudflared tunnel login` cannot write `~/.cloudflared/cert.pem`, use the Cl
 read -s 'KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN?Cloudflare Tunnel token: '
 export KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN
 KOTOVELA_CLOUDFLARE_HOSTNAME=office-api.<your-cloudflare-domain> \
-  ./scripts/install-cloudflare-readonly-tunnel-launchd.sh
+  ./scripts/install-office-bridge-runtime-launchd.sh
 unset KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN
 ```
 
@@ -126,7 +139,7 @@ To rotate an existing or exposed token, select **Refresh token** in the Tunnel o
 read -s 'KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN?New Cloudflare Tunnel token: '
 export KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN
 KOTOVELA_CLOUDFLARE_REPLACE_TUNNEL_TOKEN_FILE=1 \
-  ./scripts/install-cloudflare-readonly-tunnel-launchd.sh
+  ./scripts/install-office-bridge-runtime-launchd.sh
 unset KOTOVELA_CLOUDFLARE_TUNNEL_TOKEN
 ```
 
@@ -143,7 +156,7 @@ KOTOVELA_CLOUDFLARE_OVERWRITE_DNS=1 \
 Install the named tunnel as a user launchd agent:
 
 ```bash
-./scripts/install-cloudflare-readonly-tunnel-launchd.sh
+./scripts/install-office-bridge-runtime-launchd.sh
 ```
 
 Launchd service:
@@ -152,8 +165,8 @@ Launchd service:
 
 Logs:
 
-- `logs/cloudflare-readonly-tunnel.log`
-- `logs/cloudflare-readonly-tunnel.error.log`
+- `~/Library/Logs/Kotovela/office-bridge/cloudflare-readonly-tunnel.log`
+- `~/Library/Logs/Kotovela/office-bridge/cloudflare-readonly-tunnel.error.log`
 
 Local health checks:
 

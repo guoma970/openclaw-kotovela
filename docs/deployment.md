@@ -108,7 +108,7 @@ OFFICE_CHECK_TOKEN='随机长密钥' npm run check:office-api
   - **Cloudflare Tunnel** / **Tailscale Funnel** / **ngrok**：把 `8787` 暴露为 **HTTPS**（避免浏览器混合内容拦截）
   - 或 **仅 Tailscale/ZeroTier VPN**：手机加入同一虚拟网后访问 `http://100.x.x.x:8787`
 - **Vercel internal 前端**：前端继续走同域 `/api/office-instances` / `/api/model-usage`；在 Vercel 服务端环境变量里把上游地址设为隧道给出的 **HTTPS** 地址（分别带 `/api/office-instances` 与 `/api/model-usage` 路径）
-- **launchd**：仓库提供本机用户级 LaunchAgent 脚本，可把 `npm run serve:office-api` 注册为开机自启，并在异常退出后由 `KeepAlive` 拉起。
+- **launchd**：仓库提供本机用户级 LaunchAgent 脚本，把 office-api、只读网关和 Cloudflare connector 打包到 Git 工作树外的版本化运行目录，并在异常退出后由 `KeepAlive` 拉起。
 
 ### office API 开机自启（macOS launchd）
 
@@ -121,19 +121,26 @@ npm install
 OFFICE_API_PORT=8787 \
 OFFICE_API_TOKEN='随机长密钥' \
 OFFICE_API_CORS_ORIGIN='https://kotovelahub.vercel.app' \
-./scripts/install-office-api-launchd.sh
+./scripts/install-office-bridge-runtime-launchd.sh
 ```
 
-脚本会先生成临时 plist 并执行 `plutil -lint`，通过后才替换并加载：
+脚本会先打包并校验 release，再生成临时 plist 并执行 `plutil -lint`，通过后才替换并加载：
 
 ```text
 ~/Library/LaunchAgents/com.kotovela.office-api.plist
 ```
 
-服务实际通过 `scripts/run-office-api.sh` 在仓库根目录执行：
+服务从固定运行入口执行，不读取开发工作树：
+
+```text
+~/Library/Application Support/Kotovela/office-bridge-runtime/current
+```
+
+可变状态位于同级 `state`，凭据位于 `~/.config/kotovela`（`600`），日志位于 `~/Library/Logs/Kotovela/office-bridge`。运行 release 可按 id 独立回退：
 
 ```bash
-npm run serve:office-api
+./scripts/rollback-office-bridge-runtime-launchd.sh --list
+./scripts/rollback-office-bridge-runtime-launchd.sh <release-id>
 ```
 
 自检：
@@ -148,8 +155,8 @@ launchctl print gui/$(id -u)/com.kotovela.office-api | head -n 80
 查看日志：
 
 ```bash
-tail -f logs/office-api.log
-tail -f logs/office-api.error.log
+tail -f ~/Library/Logs/Kotovela/office-bridge/office-api.log
+tail -f ~/Library/Logs/Kotovela/office-bridge/office-api.error.log
 ```
 
 卸载/停用：
@@ -158,7 +165,7 @@ tail -f logs/office-api.error.log
 ./scripts/uninstall-office-api-launchd.sh
 ```
 
-注意：如果安装后修改 `OFFICE_API_TOKEN` / `OFFICE_API_CORS_ORIGIN` / `OFFICE_API_PORT`，需要带新环境变量重新执行安装脚本；launchd 不会自动继承交互 shell 的后续环境变量。只有在 VPN / 本机可信环境且确认不暴露到公网时，才可显式设置 `ALLOW_NO_OFFICE_API_TOKEN=1 ./scripts/install-office-api-launchd.sh` 跳过 token；不建议用于隧道或公网访问。
+注意：如果安装后修改 `OFFICE_API_TOKEN` / `OFFICE_API_CORS_ORIGIN` / `OFFICE_API_PORT`，需要带新环境变量重新执行安装脚本；launchd 不会自动继承交互 shell 的后续环境变量。公网链路不允许无 token 启动。
 
 ## 实例状态同步（远程查看）
 

@@ -95,7 +95,9 @@ const officeSnapshotPayloadSchema = z
   .strict()
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url))
-const snapshotPath = path.resolve(serverDir, '../data/office-instances.snapshot.json')
+const snapshotPath = path.resolve(
+  process.env.OFFICE_INSTANCES_SNAPSHOT_PATH ?? path.resolve(serverDir, '../data/office-instances.snapshot.json'),
+)
 
 const toMs = (value: unknown): number | undefined => {
   if (typeof value === 'number' && Number.isFinite(value)) {
